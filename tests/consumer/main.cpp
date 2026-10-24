@@ -13,6 +13,9 @@
 
 import renderengine;
 
+void transformInputs();
+void transformScenes(const std::filesystem::path &output, renderengine::Settings settings);
+
 namespace {
 using renderengine::Vertex;
 using Pixels = std::vector<std::uint8_t>;
@@ -165,6 +168,7 @@ int main(int argc, char **argv) {
     try {
         if (argc == 2 && std::string_view(argv[1]) == "--invalid-only") {
             invalidInputs();
+            transformInputs();
             return 0;
         }
         require(argc == 3 || argc == 4, "expected output directory, device and optional --validation");
@@ -179,6 +183,7 @@ int main(int argc, char **argv) {
             require(std::string_view(argv[3]) == "--validation", "invalid validation option");
         }
         scenes(argv[1], settings);
+        transformScenes(argv[1], settings);
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "error: " << error.what() << '\n';

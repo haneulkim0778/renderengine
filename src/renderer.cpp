@@ -335,20 +335,31 @@ constexpr std::array<Vertex, 6> fixtureVertices{{
     {{0.0F, -0.8F, 0.2F}, {0, 1, 0}},
 }};
 
-void validateInput(const Settings &settings, std::span<const Vertex> vertices) {
+void validateInput(const Settings &settings, std::span<const Vertex> vertices, const Transform *transform) {
     if (settings.width < 32 || settings.width > 2048 || settings.height < 32 || settings.height > 2048) {
         throw std::invalid_argument("dimensions must be between 32 and 2048");
     }
     if (vertices.size() > max_vertices || vertices.size() % 3 != 0) {
         throw std::invalid_argument("vertex count must be a multiple of three and at most 196608");
     }
+    if (transform != nullptr) {
+        for (const auto element : transform->elements) {
+            if (!std::isfinite(element) || std::abs(element) > max_transform_component) {
+                throw std::invalid_argument("transform elements must be finite and in [-1000000,1000000]");
+            }
+        }
+    }
     for (const auto &vertex : vertices) {
         for (std::size_t component = 0; component < 3; ++component) {
             const auto position = vertex.position[component];
             const auto color = vertex.color[component];
-            const auto minimum = component == 2 ? 0.0F : -1.0F;
-            if (!std::isfinite(position) || position < minimum || position > 1) {
-                throw std::invalid_argument("positions must be finite with x/y in [-1,1] and z in [0,1]");
+            const auto minimum =
+                transform != nullptr ? -max_transform_component : (component == 2 ? 0.0F : -1.0F);
+            const auto maximum = transform != nullptr ? max_transform_component : 1.0F;
+            if (!std::isfinite(position) || position < minimum || position > maximum) {
+                throw std::invalid_argument(
+                    transform != nullptr ? "input-space positions must be finite and in [-1000000,1000000]"
+                                         : "positions must be finite with x/y in [-1,1] and z in [0,1]");
             }
             if (!std::isfinite(color) || color < 0 || color > 1) {
                 throw std::invalid_argument("colors must be finite and in [0,1]");
@@ -474,6 +485,10 @@ void createPipeline(Resources &resources, const Settings &settings) {
     blending.attachmentCount = 1;
     blending.pAttachments = &blend;
     auto layout = info<VkPipelineLayoutCreateInfo>(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO);
+    static_assert(sizeof(Transform) == 64);
+    const VkPushConstantRange transformRange{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Transform)};
+    layout.pushConstantRangeCount = 1;
+    layout.pPushConstantRanges = &transformRange;
     require(vkCreatePipelineLayout(resources.device, &layout, nullptr, &resources.layout),
             "create pipeline layout");
     auto pipeline = info<VkGraphicsPipelineCreateInfo>(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO);
@@ -494,7 +509,7 @@ void createPipeline(Resources &resources, const Settings &settings) {
 }
 
 std::vector<std::uint8_t> draw(Resources &resources, const Settings &settings,
-                               std::span<const Vertex> vertices) {
+                               std::span<const Vertex> vertices, const Transform &transform) {
     createImage(resources, resources.color, settings, VK_FORMAT_R8G8B8A8_UNORM,
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT);
@@ -543,6 +558,8 @@ std::vector<std::uint8_t> draw(Resources &resources, const Settings &settings,
     renderPass.pClearValues = clears.data();
     vkCmdBeginRenderPass(command, &renderPass, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipeline);
+    vkCmdPushConstants(command, resources.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Transform),
+                       transform.elements.data());
     if (!vertices.empty()) {
         const VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(command, 0, 1, &resources.vertices.buffer, &offset);
@@ -583,19 +600,15 @@ std::vector<std::uint8_t> draw(Resources &resources, const Settings &settings,
     }
     return rgb;
 }
-} // namespace
-
-std::vector<std::uint8_t> render(const Settings &settings) { return render(settings, fixtureVertices); }
-
-std::vector<std::uint8_t> render(const Settings &settings, std::span<const Vertex> vertices) {
-    validateInput(settings, vertices);
+std::vector<std::uint8_t> renderValidated(const Settings &settings, std::span<const Vertex> vertices,
+                                          const Transform &transform) {
     Validation validation;
     std::vector<std::uint8_t> pixels;
     {
         Resources resources;
         createInstance(resources, validation, settings.validation);
         createDevice(resources, settings);
-        pixels = draw(resources, settings, vertices);
+        pixels = draw(resources, settings, vertices, transform);
     } // Include resource/device teardown in the validation result.
     if (settings.validation) {
         std::cout << "validation=sync errors=" << validation.errors.load()
@@ -605,5 +618,19 @@ std::vector<std::uint8_t> render(const Settings &settings, std::span<const Verte
         }
     }
     return pixels;
+}
+} // namespace
+
+std::vector<std::uint8_t> render(const Settings &settings) { return render(settings, fixtureVertices); }
+
+std::vector<std::uint8_t> render(const Settings &settings, std::span<const Vertex> vertices) {
+    validateInput(settings, vertices, nullptr);
+    return renderValidated(settings, vertices, Transform{});
+}
+
+std::vector<std::uint8_t> render(const Settings &settings, std::span<const Vertex> vertices,
+                                 const Transform &transform) {
+    validateInput(settings, vertices, &transform);
+    return renderValidated(settings, vertices, transform);
 }
 } // namespace renderengine

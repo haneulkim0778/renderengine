@@ -22,8 +22,18 @@ cmake_example = cmake_example.replace("${CMAKE_CURRENT_SOURCE_DIR}/renderengine"
 cmake_example = cmake_example.replace("add_subdirectory(renderengine)",
                                       f'add_subdirectory("{root.as_posix()}" renderengine)')
 cmake_example += f'\nadd_subdirectory("{root.as_posix()}/tests/consumer" consumer)\n'
+examples = readme.split("```cpp\n")[1:]
+targets = ["example"]
+for index, example in enumerate(examples):
+    filename = "main.cpp" if index == 0 else f"example_{index}.cpp"
+    (source / filename).write_text(example.split("```", 1)[0], encoding="utf-8")
+    if index:
+        target = f"example_{index}"
+        targets.append(target)
+        cmake_example += (f'\nadd_executable({target} {filename})\n'
+                          f'target_link_libraries({target} PRIVATE renderengine::renderengine)\n'
+                          f'set_target_properties({target} PROPERTIES CXX_EXTENSIONS OFF)\n')
 (source / "CMakeLists.txt").write_text(cmake_example, encoding="utf-8")
-(source / "main.cpp").write_text(readme.split("```cpp\n", 1)[1].split("```", 1)[0], encoding="utf-8")
 
 consumer = build / "documented-consumer"
 # Dependencies already belong to this compiler/build. A second manifest install
@@ -55,7 +65,7 @@ environment = dict(os.environ)
 for key in ("CC", "CXX"):
     environment.pop(key, None)
 subprocess.run(command, check=True, timeout=180, env=environment)
-subprocess.run(["cmake", "--build", str(consumer), "--target", "example", "scene_consumer", "--parallel", "2"],
+subprocess.run(["cmake", "--build", str(consumer), "--target", *targets, "scene_consumer", "--parallel", "2"],
                check=True, timeout=180, env=environment)
 assert dependency_state() == dependencies, "standalone build modified provisioned dependencies"
 executable = consumer / "consumer" / ("scene_consumer.exe" if os.name == "nt" else "scene_consumer")

@@ -137,6 +137,64 @@ later calls or input changes do not alter earlier results. Sequential calls are
 independent; concurrent calls are not supported. The original `render(settings)`
 overload retains the two-triangle demo and all CLI defaults.
 
+### Object/world-space geometry
+
+`render(settings, vertices, transform)` applies one caller-supplied `Transform` to
+the entire triangle list. Its `elements` store a 4x4 matrix in **row-major** order
+(`elements[row * 4 + column]`); the default is identity. Multiplication uses column
+vectors: `clip = M * [x,y,z,1]`, so translation occupies elements 3, 7 and 11.
+Compose model, view and projection in the caller as `projection * view * model`.
+The library provides no camera or matrix-building utilities.
+
+Positions in this overload are input-space coordinates. Position components and
+all 16 matrix elements must be finite and in [-1000000,1000000], inclusive
+(`max_transform_component`). This conservative arithmetic domain bounds each
+shader dot product by `3 * 10^12 + 10^6`, preventing float overflow even before
+cancellation; it is not a promise of precise rendering at extreme scales or near
+degeneracies. Invalid matrices are rejected even for empty input, before Vulkan
+setup. Singular matrices are accepted; degenerate triangles have no area.
+RGB, dimensions, triangle counts, reversal, synchronous borrowing and owned-result
+contracts are unchanged. The original two overloads still reject positions outside
+their normalized ranges.
+
+The vertex shader preserves homogeneous `w`. Vulkan clips against `-w <= x,y <= w`
+and `0 <= z <= w` before perspective division, and interpolates RGB with perspective
+correction. Off-screen or behind-camera triangles can be supplied, and partially
+visible triangles are clipped. After division, x increases rightward and y downward;
+depth still clears to 1 and uses strict `LESS`. A conventional y-up camera must
+include a y flip in its supplied transform.
+
+This example supplies a +Z-looking, y-down perspective camera with a 90-degree
+vertical field of view, aspect ratio 3:2, near plane 1 and far plane 4:
+
+```cpp
+#include <array>
+#include <cstdint>
+#include <span>
+#include <vector>
+
+import renderengine;
+
+int main() {
+    renderengine::Settings settings;
+    settings.width = 96;
+    settings.height = 64;
+    const std::array<renderengine::Vertex, 3> vertices{{
+        {{-1.125F, -0.75F, 1}, {1, 0, 0}},
+        {{ 2.25F,  -1.5F, 2}, {0, 1, 0}},
+        {{ -4.5F,     3, 4}, {0, 0, 1}},
+    }};
+    const renderengine::Transform projection{{
+        2.0F / 3, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 4.0F / 3, -4.0F / 3,
+        0, 0, 1, 0,
+    }};
+    const auto pixels = renderengine::render(settings, vertices, projection);
+    return pixels.size() == 96 * 64 * 3 ? 0 : 1;
+}
+```
+
 ## Run
 
 ```sh
@@ -186,8 +244,8 @@ Images remain under the build directory's `images` subdirectory. These probes do
 not constitute an exhaustive rasterization test or cross-driver image hash.
 
 `scene_consumer` is compiled separately in `tests/consumer` and links only the
-public target. `consumer_build` additionally compiles the README's CMake and C++
-examples in a standalone parent project and runs the consumer's input checks.
+public target. `consumer_build` additionally compiles the README's CMake and all complete C++
+examples literally in a standalone parent project and runs the consumer's input checks.
 It reuses the configured compiler, triplets and installed dependencies with
 `VCPKG_MANIFEST_INSTALL=OFF`, so verification cannot reprovision shared packages
 when `CC`/`CXX` are absent. It checks that installed package files remain unchanged.
@@ -200,6 +258,18 @@ and independent owned results. `tests/scene_pixels.py` independently checks imag
 placement, interpolation, orientation and occlusion without reading renderer or
 consumer geometry. `scene_oracle` checks corrupt-output rejection and stale-output
 protection. Scene images and compact evidence are under `images/scenes`.
+
+The same import-only consumer tests transformed geometry at 96x64: identity,
+asymmetric affine placement, unequal-w perspective interpolation, depth in both
+orders, near/side clipping, fully outside/behind/far geometry, empty/degenerate
+input and the arithmetic/count boundaries. It checks borrowed vertex/matrix
+immutability, changed inputs, cleared depth and independent owned results.
+`tests/transform_pixels.py` derives expected colors and depth from independent
+screen-space triangle coordinates and analytical barycentric weights, without
+reading the renderer or consumer geometry. `transform_oracle` proves rejection of
+wrong placement, affine interpolation, negative near-depth, reversed depth and
+blank/truncated output. Invalid matrices/coordinates, including extreme finite
+values and invalid empty calls, are checked without an available Vulkan ICD.
 
 For software Vulkan, restrict the loader to your installed Mesa lavapipe ICD using
 `VK_DRIVER_FILES`, then configure `RENDERENGINE_TEST_DEVICE=software`. On Debian or
@@ -218,7 +288,7 @@ For source quality, use clang-format **18.1.8** and clang-tidy from the **same C
 
 ```sh
 clang-format --dry-run --Werror src/*.cpp src/*.cppm tests/consumer/*.cpp
-clang-tidy-18 -p build/debug src/main.cpp src/renderer.cpp src/renderengine.cppm tests/consumer/main.cpp
+clang-tidy-18 -p build/debug src/main.cpp src/renderer.cpp src/renderengine.cppm tests/consumer/main.cpp tests/consumer/transforms.cpp
 ```
 
 Build before running clang-tidy so module artifacts and dependency maps exist.
@@ -235,7 +305,7 @@ validation remains a separate execution gate.
 ## Design and scope
 
 `src/renderengine.cppm` exports the named C++20 module `renderengine` with its
-settings, vertex and render interface. CMake's public `CXX_MODULES` file set on
+settings, vertex, transform and render interface. CMake's public `CXX_MODULES` file set on
 `renderengine_core` and Ninja dependency scanning order interface and importer
 builds. Standard library and Vulkan/volk
 headers stay in global module fragments; neither `import std` nor third-party
@@ -243,7 +313,8 @@ header units are required. Module binary artifacts are compiler-specific and are
 never shared between toolchains.
 
 The renderer uses one graphics queue, one render pass and one submission. Vertex
-data is flushed before submission. The render pass clears depth to 1, tests with
+data is flushed before submission. A 64-byte vertex push constant carries the
+transform; Slang compilation explicitly selects row-major layout. The render pass clears depth to 1, tests with
 `LESS`, and makes color writes available to the transfer copy. A transfer-to-host
 barrier, completion fence and mapped-memory invalidation precede readback, including
 on non-coherent memory. The resource owner waits for device completion and destroys
@@ -257,7 +328,7 @@ WebGPU is a later option when browser distribution is needed; there is no univer
 backend interface yet. Robot Framework would add another runner without improving
 the current pixel oracle, so CTest and Python own acceptance. WSL is useful for
 Linux software checks, not evidence of native Linux GPU or presentation support.
-There are no performance targets, swapchain, cameras, textures or scene-file API in
+There are no performance targets, swapchain, camera helpers, textures or scene-file API in
 this milestone.
 
 References: [Vulkan version compatibility](https://docs.vulkan.org/guide/latest/versions.html),

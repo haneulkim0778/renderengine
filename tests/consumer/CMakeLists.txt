@@ -5,7 +5,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   add_subdirectory(../.. renderengine)
 endif()
 
-add_executable(scene_consumer main.cpp)
+add_executable(scene_consumer main.cpp transforms.cpp)
 target_link_libraries(scene_consumer PRIVATE renderengine::renderengine)
 set_target_properties(scene_consumer PROPERTIES CXX_EXTENSIONS OFF)
 if(MSVC)

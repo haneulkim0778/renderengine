@@ -28,7 +28,7 @@ foreach(stage vertex fragment)
   add_custom_command(OUTPUT "${header}"
     COMMAND "${SLANGC}" "${CMAKE_CURRENT_SOURCE_DIR}/shaders/fixture.slang"
       -entry "${stage}Main" -stage ${stage} -target spirv -profile spirv_1_5
-      -emit-spirv-directly -o "${binary}"
+      -matrix-layout-row-major -emit-spirv-directly -o "${binary}"
     COMMAND "${SPIRV_VAL}" --target-env vulkan1.2 "${binary}"
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/embed_spirv.py"
       "${binary}" "${header}" "${stage}_spv"
@@ -67,6 +67,7 @@ if(BUILD_TESTING)
   add_test(NAME oracle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oracle.py")
   add_test(NAME harness COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_acceptance.py")
   add_test(NAME scene_oracle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_scenes.py")
+  add_test(NAME transform_oracle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_transforms.py")
   add_test(NAME scene_input COMMAND scene_consumer --invalid-only)
   add_test(NAME consumer_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/consumer_build.py"
     "${CMAKE_CURRENT_BINARY_DIR}")

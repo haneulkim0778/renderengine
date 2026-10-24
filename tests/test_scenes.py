@@ -43,6 +43,7 @@ class SceneTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             (output / "gradient.ppm").write_bytes(b"stale")
+            (output / "transform-perspective.ppm").write_bytes(b"stale")
             (output / "evidence.json").write_text("stale", encoding="utf-8")
             result = subprocess.CompletedProcess([], 0, "scene consumer passed", "")
             arguments = ["scenes.py", "unused-consumer", str(output)]
@@ -52,6 +53,7 @@ class SceneTest(unittest.TestCase):
                     scenes.main()
             self.assertFalse((output / "evidence.json").exists())
             self.assertFalse((output / "gradient.ppm").exists())
+            self.assertFalse((output / "transform-perspective.ppm").exists())
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ def object_times():
         "implementation": "CMakeFiles/renderengine_core.dir/src/renderer.cpp",
         "cli": "CMakeFiles/renderengine.dir/src/main.cpp",
         "consumer": "tests/consumer/CMakeFiles/scene_consumer.dir/main.cpp",
+        "transform_consumer": "tests/consumer/CMakeFiles/scene_consumer.dir/transforms.cpp",
     }
     times = {}
     for name, stem in objects.items():
@@ -61,6 +62,6 @@ compile_project()
 assert all(path.stat().st_mtime_ns > stamp for path, stamp in previous.items()), "shader rebuild missing"
 updated = object_times()
 assert updated["implementation"] > after["implementation"], "shader edit did not rebuild renderer"
-assert all(updated[name] == after[name] for name in ("interface", "cli", "consumer")), "unrelated shader rebuild"
+assert all(updated[name] == after[name] for name in ("interface", "cli", "consumer", "transform_consumer")), "unrelated shader rebuild"
 assert all(executable_times()[path] > previous for path, previous in linked.items()), "shader edit did not relink"
 print("incremental module and shader rebuild checks passed")

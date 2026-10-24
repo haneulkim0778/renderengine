@@ -1,3 +1,10 @@
+struct Transform
+{
+    float4x4 matrix;
+};
+
+[[vk::push_constant]] ConstantBuffer<Transform> transform;
+
 struct VertexOutput
 {
     float4 position : SV_Position;
@@ -8,7 +15,7 @@ struct VertexOutput
 VertexOutput vertexMain(float3 position : POSITION, float3 color : COLOR0)
 {
     VertexOutput result;
-    result.position = float4(position, 1.0);
+    result.position = mul(transform.matrix, float4(position, 1.0));
     result.color = color;
     return result;
 }

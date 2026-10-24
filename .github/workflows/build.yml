@@ -34,7 +34,7 @@ jobs:
       - name: Formatting and focused analysis
         run: |
           clang-format --dry-run --Werror src/*.cpp src/*.cppm tests/consumer/*.cpp
-          clang-tidy-18 -p build/debug src/main.cpp src/renderer.cpp src/renderengine.cppm tests/consumer/main.cpp
+          clang-tidy-18 -p build/debug src/main.cpp src/renderer.cpp src/renderengine.cppm tests/consumer/main.cpp tests/consumer/transforms.cpp
       - name: Checked software rendering
         run: |
           export VK_DRIVER_FILES="$(dpkg -L mesa-vulkan-drivers | grep '/lvp_icd.*\.json$')"
@@ -74,7 +74,7 @@ jobs:
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
             cmake --build --preset $configuration --parallel 2
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
-            ctest --preset $configuration -R '^(oracle|harness|scene_oracle|scene_input|consumer_build)$'
+            ctest --preset $configuration -R '^(oracle|harness|scene_oracle|transform_oracle|scene_input|consumer_build)$'
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
             & "build/$configuration/renderengine.exe" --help
             if ($LASTEXITCODE) { exit $LASTEXITCODE }

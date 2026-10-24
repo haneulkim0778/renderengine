@@ -23,6 +23,14 @@ struct Vertex {
     std::array<float, 3> color;
 };
 
+// Row-major storage; clip = M * column_vector(x, y, z, 1). Defaults to identity.
+struct Transform {
+    std::array<float, 16> elements{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+};
+
+// Conservative bound for each input-space coordinate and transform coefficient.
+inline constexpr float max_transform_component = 1'000'000.0F;
+
 // At most 65,536 non-indexed triangles per synchronous call.
 inline constexpr std::size_t max_vertices = 196608;
 
@@ -32,6 +40,12 @@ inline constexpr std::size_t max_vertices = 196608;
 // Returns owned tightly packed RGB bytes, top row first. Dimensions must be 32..2048.
 // Invalid input throws std::invalid_argument before Vulkan setup; Vulkan failures throw std::runtime_error.
 std::vector<std::uint8_t> render(const Settings &settings, std::span<const Vertex> vertices);
+
+// Input-space positions and matrix elements must be finite and within +/- max_transform_component.
+// Vulkan clips homogeneous output before division by w; RGB is perspective-correct.
+// All other count, color, depth, ownership and error contracts above apply unchanged.
+std::vector<std::uint8_t> render(const Settings &settings, std::span<const Vertex> vertices,
+                                 const Transform &transform);
 
 // Returns tightly packed RGB pixels, top row first. Throws on any failed requirement.
 // Compatibility demo: renders the original two-triangle depth fixture.
