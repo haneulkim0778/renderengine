@@ -33,8 +33,8 @@ jobs:
           python tests/incremental.py build/debug
       - name: Formatting and focused analysis
         run: |
-          clang-format --dry-run --Werror src/*.cpp src/*.cppm
-          clang-tidy-18 -p build/debug src/main.cpp src/renderer.cpp src/renderengine.cppm
+          clang-format --dry-run --Werror src/*.cpp src/*.cppm tests/consumer/*.cpp
+          clang-tidy-18 -p build/debug src/main.cpp src/renderer.cpp src/renderengine.cppm tests/consumer/main.cpp
       - name: Checked software rendering
         run: |
           export VK_DRIVER_FILES="$(dpkg -L mesa-vulkan-drivers | grep '/lvp_icd.*\.json$')"
@@ -47,6 +47,8 @@ jobs:
           path: |
             build/debug/images/*.ppm
             build/debug/images/evidence.json
+            build/debug/images/scenes/*.ppm
+            build/debug/images/scenes/evidence.json
           if-no-files-found: ignore
 
   windows-build:
@@ -72,7 +74,7 @@ jobs:
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
             cmake --build --preset $configuration --parallel 2
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
-            ctest --preset $configuration -R '^(oracle|harness)$'
+            ctest --preset $configuration -R '^(oracle|harness|scene_oracle|scene_input|consumer_build)$'
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
             & "build/$configuration/renderengine.exe" --help
             if ($LASTEXITCODE) { exit $LASTEXITCODE }

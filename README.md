@@ -1,8 +1,9 @@
 # renderengine
 
-A small C++20 command-line renderer that draws two overlapping triangles through
-Vulkan and writes a checked RGB image. It uses a real depth attachment: the green
-triangle stays in front of the red triangle when draw order is reversed. There is
+A small C++20 rendering library and command-line demo that draw colored triangles
+through Vulkan and return checked RGB images. The demo draws two overlapping
+triangles with a real depth attachment: the green triangle stays in front of the
+red triangle when draw order is reversed. There is
 no window, surface, asset loader or runtime shader compiler.
 
 ## Requirements
@@ -57,6 +58,85 @@ Bootstrap changes no drivers or global tool configuration. Preserve dependency
 licenses if redistributing tool or dependency binaries; their licenses are separate
 from this project's MIT license.
 
+## Use from C++
+
+The build-tree target `renderengine::renderengine` supplies the C++20 named module,
+its implementation and link dependencies. A consuming project can add this checkout
+as a subdirectory and link the target; it does not include implementation sources,
+Vulkan headers or generated shaders:
+
+```cmake
+cmake_minimum_required(VERSION 3.28)
+# Use the renderer manifest, or provide equivalent dependencies in the parent manifest.
+set(VCPKG_MANIFEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/renderengine")
+project(example LANGUAGES C CXX)
+# Configure with the same vcpkg toolchain and SLANG_ROOT used above.
+add_subdirectory(renderengine)
+add_executable(example main.cpp)
+target_link_libraries(example PRIVATE renderengine::renderengine)
+set_target_properties(example PROPERTIES CXX_EXTENSIONS OFF)
+```
+
+Use Ninja and the supported compiler versions listed above. The toolchain must be
+selected before the parent `project()` call, for example through
+`-DCMAKE_TOOLCHAIN_FILE=renderengine/.tools/vcpkg/scripts/buildsystems/vcpkg.cmake`.
+Set `SLANG_ROOT` to the provisioned Slang directory in that checkout. This is a
+source/build-tree integration, not an installed SDK; compiler-specific module
+artifacts are rebuilt for each toolchain. `BUILD_TESTING=OFF` omits the test consumer.
+The target supplies C++20; importers must also disable compiler extensions to match
+the module's compiler mode. In particular, Clang cannot import its strict C++20
+module from a translation unit compiled in GNU C++20 mode.
+`tests/consumer` also supports a standalone top-level configure, using this
+checkout's vcpkg manifest, toolchain and Slang directory; it exercises the same
+`add_subdirectory` integration without relying on the renderer's top-level build.
+
+```cpp
+#include <array>
+#include <cstdint>
+#include <span>
+#include <vector>
+
+import renderengine;
+
+int main() {
+    const std::array<renderengine::Vertex, 3> triangle{{
+        {{-0.75F, -0.75F, 0.5F}, {1, 0, 0}},
+        {{ 0.75F, -0.75F, 0.5F}, {0, 1, 0}},
+        {{-0.75F,  0.75F, 0.5F}, {0, 0, 1}},
+    }};
+    const auto pixels = renderengine::render(renderengine::Settings{}, triangle);
+    return pixels.size() == 256 * 256 * 3 ? 0 : 1;
+}
+```
+
+`render(settings, std::span<const Vertex>)` accepts consecutive triples as ordered,
+non-indexed triangles. The vertex count must be a multiple of three and at most
+`max_vertices` (196608, or 65536 triangles). An empty span returns a black image.
+All components must be finite: position x/y are in [-1,1], z is in [0,1], and RGB
+is in [0,1]. Out-of-range values are rejected rather than clamped or clipped.
+Positions use homogeneous w=1: x increases rightward, y downward; (-1,-1) is the
+top-left image boundary and (1,1) the bottom-right. Pixel centers sample the
+interior. This API accepts already normalized geometry, not world coordinates.
+
+Vertex RGB is smoothly interpolated, written to an RGBA8 UNORM attachment and
+returned as RGB without gamma conversion. Rendering is opaque and single-sampled,
+with no face culling. Depth clears to 1 and uses strict `LESS`: smaller z wins,
+z=1 does not draw against the clear value, and equal-depth fragments keep the first
+triangle. `Settings::reverse` reverses complete triangles without changing their
+vertex order. Only unequal-depth visibility is independent of triangle order;
+boundary coverage follows rasterization rules and is not a cross-driver byte-hash
+guarantee.
+
+Both dimensions must be 32..2048. Bad dimensions, counts or components throw
+`std::invalid_argument` before Vulkan setup, including when no Vulkan runtime is
+available. A valid call still requires the selected Vulkan device and may fail
+on runtime/resource requirements. Input is read-only, borrowed only for the
+synchronous call, and must remain valid and unchanged by the caller until return.
+Returned vectors own their tightly packed `width * height * 3` bytes, top row first;
+later calls or input changes do not alter earlier results. Sequential calls are
+independent; concurrent calls are not supported. The original `render(settings)`
+overload retains the two-triangle demo and all CLI defaults.
+
 ## Run
 
 ```sh
@@ -98,11 +178,28 @@ ctest --preset debug
 
 `oracle` proves the independent Python checker rejects blank output, wrong overlap
 and truncation. `harness` proves a successful process that writes nothing cannot
-reuse stale images or leave a stale success report. `render` checks both orders at 256×256, 96×64 and 32×32, validates
-background/triangle/depth probes with a two-byte channel tolerance, compares the two
+reuse stale images or leave a stale success report. `render` checks both orders at
+256x256, 96x64 and 32x32, validates background/triangle/depth probes with a two-byte
+channel tolerance, compares the two
 orders on the same device, checks CLI/output failures and repeats ten renders.
 Images remain under the build directory's `images` subdirectory. These probes do
 not constitute an exhaustive rasterization test or cross-driver image hash.
+
+`scene_consumer` is compiled separately in `tests/consumer` and links only the
+public target. `consumer_build` additionally compiles the README's CMake and C++
+examples in a standalone parent project and runs the consumer's input checks.
+It reuses the configured compiler, triplets and installed dependencies with
+`VCPKG_MANIFEST_INSTALL=OFF`, so verification cannot reprovision shared packages
+when `CC`/`CXX` are absent. It checks that installed package files remain unchanged.
+`scene_input` rejects invalid dimensions, counts, NaN/infinity and component ranges
+with an unavailable ICD, without entering Vulkan setup.
+`scenes` renders caller geometry in one process: an asymmetric interpolated
+triangle, changed colors, three triangles in both orders, empty input, repeated
+input, depth ties, far-plane depth and the count limit. It checks immutable input
+and independent owned results. `tests/scene_pixels.py` independently checks image
+placement, interpolation, orientation and occlusion without reading renderer or
+consumer geometry. `scene_oracle` checks corrupt-output rejection and stale-output
+protection. Scene images and compact evidence are under `images/scenes`.
 
 For software Vulkan, restrict the loader to your installed Mesa lavapipe ICD using
 `VK_DRIVER_FILES`, then configure `RENDERENGINE_TEST_DEVICE=software`. On Debian or
@@ -120,23 +217,27 @@ For source quality, use clang-format **18.1.8** and clang-tidy from the **same C
 18 distribution used to compile the Linux modules**:
 
 ```sh
-clang-format --dry-run --Werror src/*.cpp src/*.cppm
-clang-tidy-18 -p build/debug src/main.cpp src/renderer.cpp src/renderengine.cppm
+clang-format --dry-run --Werror src/*.cpp src/*.cppm tests/consumer/*.cpp
+clang-tidy-18 -p build/debug src/main.cpp src/renderer.cpp src/renderengine.cppm tests/consumer/main.cpp
 ```
 
 Build before running clang-tidy so module artifacts and dependency maps exist.
 `python tests/incremental.py build/debug` checks a no-op build, then touches the
 module interface and shader to verify dependency rebuilds without changing content.
+It checks both CLI and independent consumer rebuild/relink behavior; shader edits
+recompile the renderer without recompiling unrelated importer objects.
 The focused checks are in `.clang-tidy`; compiler warnings are errors. GitHub
-Actions builds both Windows configurations and runs the Linux software-render,
-validation, formatting and analysis checks. Hosted Windows builds do not establish
-hardware-rendering support; hardware validation remains a separate execution gate.
+Actions builds both Windows configurations, runs the CPU-only input/oracle/harness
+checks, and runs Linux software rendering, validation, formatting and analysis.
+Hosted Windows builds do not establish hardware-rendering support; hardware
+validation remains a separate execution gate.
 
 ## Design and scope
 
-`src/renderengine.cppm` exports the named C++20 module `renderengine` with its small
-settings/render interface. CMake's `CXX_MODULES` file set and Ninja dependency
-scanning order interface and importer builds. Standard library and Vulkan/volk
+`src/renderengine.cppm` exports the named C++20 module `renderengine` with its
+settings, vertex and render interface. CMake's public `CXX_MODULES` file set on
+`renderengine_core` and Ninja dependency scanning order interface and importer
+builds. Standard library and Vulkan/volk
 headers stay in global module fragments; neither `import std` nor third-party
 header units are required. Module binary artifacts are compiler-specific and are
 never shared between toolchains.

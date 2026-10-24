@@ -8,9 +8,11 @@ module;
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <iostream>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -324,11 +326,7 @@ void createBuffer(Resources &resources, Buffer &buffer, VkDeviceSize size, VkBuf
             "map buffer memory");
 }
 
-struct Vertex {
-    std::array<float, 3> position;
-    std::array<float, 3> color;
-};
-constexpr std::array<Vertex, 6> vertices{{
+constexpr std::array<Vertex, 6> fixtureVertices{{
     {{-0.8F, -0.8F, 0.7F}, {1, 0, 0}},
     {{0.8F, -0.8F, 0.7F}, {1, 0, 0}},
     {{0.0F, 0.8F, 0.7F}, {1, 0, 0}},
@@ -336,6 +334,28 @@ constexpr std::array<Vertex, 6> vertices{{
     {{0.8F, 0.8F, 0.2F}, {0, 1, 0}},
     {{0.0F, -0.8F, 0.2F}, {0, 1, 0}},
 }};
+
+void validateInput(const Settings &settings, std::span<const Vertex> vertices) {
+    if (settings.width < 32 || settings.width > 2048 || settings.height < 32 || settings.height > 2048) {
+        throw std::invalid_argument("dimensions must be between 32 and 2048");
+    }
+    if (vertices.size() > max_vertices || vertices.size() % 3 != 0) {
+        throw std::invalid_argument("vertex count must be a multiple of three and at most 196608");
+    }
+    for (const auto &vertex : vertices) {
+        for (std::size_t component = 0; component < 3; ++component) {
+            const auto position = vertex.position[component];
+            const auto color = vertex.color[component];
+            const auto minimum = component == 2 ? 0.0F : -1.0F;
+            if (!std::isfinite(position) || position < minimum || position > 1) {
+                throw std::invalid_argument("positions must be finite with x/y in [-1,1] and z in [0,1]");
+            }
+            if (!std::isfinite(color) || color < 0 || color > 1) {
+                throw std::invalid_argument("colors must be finite and in [0,1]");
+            }
+        }
+    }
+}
 
 void createPipeline(Resources &resources, const Settings &settings) {
     std::array<VkAttachmentDescription, 2> attachments{};
@@ -473,19 +493,30 @@ void createPipeline(Resources &resources, const Settings &settings) {
             "create graphics pipeline");
 }
 
-std::vector<std::uint8_t> draw(Resources &resources, const Settings &settings) {
+std::vector<std::uint8_t> draw(Resources &resources, const Settings &settings,
+                               std::span<const Vertex> vertices) {
     createImage(resources, resources.color, settings, VK_FORMAT_R8G8B8A8_UNORM,
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT);
     createImage(resources, resources.depth, settings, VK_FORMAT_D32_SFLOAT,
                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
-    createBuffer(resources, resources.vertices, sizeof(vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    std::memcpy(resources.vertices.mapped, vertices.data(), sizeof(vertices));
-    auto vertexRange = info<VkMappedMemoryRange>(VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE);
-    vertexRange.memory = resources.vertices.memory;
-    vertexRange.size = VK_WHOLE_SIZE;
-    // Flush is also valid for coherent memory; whole allocation satisfies atom alignment.
-    require(vkFlushMappedMemoryRanges(resources.device, 1, &vertexRange), "flush vertex upload");
+    if (!vertices.empty()) {
+        createBuffer(resources, resources.vertices, vertices.size_bytes(), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        if (settings.reverse) {
+            auto *destination = static_cast<std::byte *>(resources.vertices.mapped);
+            for (std::size_t i = 0; i < vertices.size(); i += 3) {
+                std::memcpy(destination + i * sizeof(Vertex), vertices.data() + vertices.size() - i - 3,
+                            3 * sizeof(Vertex));
+            }
+        } else {
+            std::memcpy(resources.vertices.mapped, vertices.data(), vertices.size_bytes());
+        }
+        auto vertexRange = info<VkMappedMemoryRange>(VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE);
+        vertexRange.memory = resources.vertices.memory;
+        vertexRange.size = VK_WHOLE_SIZE;
+        // Flush is also valid for coherent memory; whole allocation satisfies atom alignment.
+        require(vkFlushMappedMemoryRanges(resources.device, 1, &vertexRange), "flush vertex upload");
+    }
     const VkDeviceSize pixelCount = static_cast<VkDeviceSize>(settings.width) * settings.height;
     createBuffer(resources, resources.readback, pixelCount * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     createPipeline(resources, settings);
@@ -512,10 +543,11 @@ std::vector<std::uint8_t> draw(Resources &resources, const Settings &settings) {
     renderPass.pClearValues = clears.data();
     vkCmdBeginRenderPass(command, &renderPass, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, resources.pipeline);
-    const VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(command, 0, 1, &resources.vertices.buffer, &offset);
-    vkCmdDraw(command, 3, 1, settings.reverse ? 3 : 0, 0);
-    vkCmdDraw(command, 3, 1, settings.reverse ? 0 : 3, 0);
+    if (!vertices.empty()) {
+        const VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(command, 0, 1, &resources.vertices.buffer, &offset);
+        vkCmdDraw(command, static_cast<std::uint32_t>(vertices.size()), 1, 0, 0);
+    }
     vkCmdEndRenderPass(command);
     VkBufferImageCopy copy{};
     copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -553,14 +585,17 @@ std::vector<std::uint8_t> draw(Resources &resources, const Settings &settings) {
 }
 } // namespace
 
-std::vector<std::uint8_t> render(const Settings &settings) {
+std::vector<std::uint8_t> render(const Settings &settings) { return render(settings, fixtureVertices); }
+
+std::vector<std::uint8_t> render(const Settings &settings, std::span<const Vertex> vertices) {
+    validateInput(settings, vertices);
     Validation validation;
     std::vector<std::uint8_t> pixels;
     {
         Resources resources;
         createInstance(resources, validation, settings.validation);
         createDevice(resources, settings);
-        pixels = draw(resources, settings);
+        pixels = draw(resources, settings, vertices);
     } // Include resource/device teardown in the validation result.
     if (settings.validation) {
         std::cout << "validation=sync errors=" << validation.errors.load()
