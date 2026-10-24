@@ -74,6 +74,7 @@ project(example LANGUAGES C CXX)
 add_subdirectory(renderengine)
 add_executable(example main.cpp)
 target_link_libraries(example PRIVATE renderengine::renderengine)
+set_target_properties(example PROPERTIES CXX_EXTENSIONS OFF)
 ```
 
 Use Ninja and the supported compiler versions listed above. The toolchain must be
@@ -82,6 +83,9 @@ selected before the parent `project()` call, for example through
 Set `SLANG_ROOT` to the provisioned Slang directory in that checkout. This is a
 source/build-tree integration, not an installed SDK; compiler-specific module
 artifacts are rebuilt for each toolchain. `BUILD_TESTING=OFF` omits the test consumer.
+The target supplies C++20; importers must also disable compiler extensions to match
+the module's compiler mode. In particular, Clang cannot import its strict C++20
+module from a translation unit compiled in GNU C++20 mode.
 `tests/consumer` also supports a standalone top-level configure, using this
 checkout's vcpkg manifest, toolchain and Slang directory; it exercises the same
 `add_subdirectory` integration without relying on the renderer's top-level build.
@@ -182,8 +186,11 @@ Images remain under the build directory's `images` subdirectory. These probes do
 not constitute an exhaustive rasterization test or cross-driver image hash.
 
 `scene_consumer` is compiled separately in `tests/consumer` and links only the
-public target. `consumer_build` additionally configures it as a standalone parent
-project, builds it with the current toolchain/dependencies and runs its input checks.
+public target. `consumer_build` additionally compiles the README's CMake and C++
+examples in a standalone parent project and runs the consumer's input checks.
+It reuses the configured compiler, triplets and installed dependencies with
+`VCPKG_MANIFEST_INSTALL=OFF`, so verification cannot reprovision shared packages
+when `CC`/`CXX` are absent. It checks that installed package files remain unchanged.
 `scene_input` rejects invalid dimensions, counts, NaN/infinity and component ranges
 with an unavailable ICD, without entering Vulkan setup.
 `scenes` renders caller geometry in one process: an asymmetric interpolated
