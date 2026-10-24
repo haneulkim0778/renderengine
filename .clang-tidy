@@ -1,0 +1,3 @@
+Checks: '-*,bugprone-argument-comment,bugprone-branch-clone,bugprone-dangling-handle,bugprone-sizeof-expression,bugprone-suspicious-memset-usage,bugprone-use-after-move,clang-analyzer-core.*,clang-analyzer-cplusplus.*'
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'src/.*'
