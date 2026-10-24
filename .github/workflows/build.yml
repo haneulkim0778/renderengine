@@ -59,6 +59,7 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
+          toolset: '14.44'
       - name: Provision
         run: |
           python -m pip install cmake==3.31.6 ninja==1.11.1.4
@@ -71,7 +72,7 @@ jobs:
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
             cmake --build --preset $configuration --parallel 2
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
-            ctest --preset $configuration -R '^oracle$'
+            ctest --preset $configuration -R '^(oracle|harness)$'
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
             & "build/$configuration/renderengine.exe" --help
             if ($LASTEXITCODE) { exit $LASTEXITCODE }

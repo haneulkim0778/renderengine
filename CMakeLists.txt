@@ -58,6 +58,7 @@ if(BUILD_TESTING)
     set(validation_arg --validation)
   endif()
   add_test(NAME oracle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_oracle.py")
+  add_test(NAME harness COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_acceptance.py")
   add_test(NAME render COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/acceptance.py"
     $<TARGET_FILE:renderengine> "${CMAKE_CURRENT_BINARY_DIR}/images"
     --device "${RENDERENGINE_TEST_DEVICE}" ${validation_arg})

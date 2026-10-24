@@ -7,8 +7,8 @@ no window, surface, asset loader or runtime shader compiler.
 
 ## Requirements
 
-- Windows x64 with Visual Studio 2022 C++ Build Tools (MSVC 14.34 or newer), or
-  Linux x86-64 with Clang 18.1.8 and its matching `clang-scan-deps` tool.
+- Windows x64 with Visual Studio 2022 C++ Build Tools (MSVC 14.44), or
+  Linux x86-64 with Clang 18 and its matching `clang-scan-deps` tool.
 - CMake 3.28+, Ninja 1.11+, Python 3.12+, Git, and network access for provisioning.
   CI uses CMake 3.31.6, Ninja 1.11.1.4 and Python 3.12.10.
 - A Vulkan loader and a device supporting Vulkan 1.2, a graphics queue,
@@ -97,7 +97,8 @@ ctest --preset debug
 ```
 
 `oracle` proves the independent Python checker rejects blank output, wrong overlap
-and truncation. `render` checks both orders at 256×256, 96×64 and 32×32, validates
+and truncation. `harness` proves a successful process that writes nothing cannot
+reuse stale images or leave a stale success report. `render` checks both orders at 256×256, 96×64 and 32×32, validates
 background/triangle/depth probes with a two-byte channel tolerance, compares the two
 orders on the same device, checks CLI/output failures and repeats ten renders.
 Images remain under the build directory's `images` subdirectory. These probes do

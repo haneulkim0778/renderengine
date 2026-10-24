@@ -19,6 +19,7 @@ def main():
     args = parser.parse_args()
     assert args.executable.is_file(), "renderer executable has not been implemented"
     args.output.mkdir(parents=True, exist_ok=True)
+    (args.output / "evidence.json").unlink(missing_ok=True)
 
     def run(options, success=True, diagnostic=None):
         result = subprocess.run([str(args.executable.resolve()), *options],
@@ -41,6 +42,7 @@ def main():
         images = []
         for order in ["forward", "reverse"]:
             output = args.output / f"{width}x{height}-{order}.ppm"
+            output.unlink(missing_ok=True)
             result = run(common + ["--output", str(output), "--width", str(width),
                                    "--height", str(height), "--order", order])
             if args.device != "any":
@@ -55,6 +57,7 @@ def main():
     # Deliberately repeated to exercise creation, submission and clean teardown.
     for iteration in range(10):
         output = args.output / "repeat.ppm"
+        output.unlink(missing_ok=True)
         run(common + ["--output", str(output), "--order",
                       "forward" if iteration % 2 else "reverse"])
         check(output)
