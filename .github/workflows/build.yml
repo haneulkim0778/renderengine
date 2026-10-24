@@ -1,0 +1,80 @@
+name: build
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  VCPKG_MAX_CONCURRENCY: 2
+
+jobs:
+  linux-software:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.10'
+      - name: Tools and software Vulkan
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 clang-tools-18 clang-tidy-18 mesa-vulkan-drivers vulkan-validationlayers libvulkan1
+          python -m pip install cmake==3.31.6 ninja==1.11.1.4 clang-format==18.1.8
+          python scripts/bootstrap.py
+      - name: Configure and build
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: |
+          cmake --preset debug -DRENDERENGINE_TEST_DEVICE=software -DRENDERENGINE_TEST_VALIDATION=ON
+          cmake --build --preset debug --parallel 2
+          python tests/incremental.py build/debug
+      - name: Formatting and focused analysis
+        run: |
+          clang-format --dry-run --Werror src/*.cpp src/*.cppm
+          clang-tidy-18 -p build/debug src/main.cpp src/renderer.cpp src/renderengine.cppm
+      - name: Checked software rendering
+        run: |
+          export VK_DRIVER_FILES="$(dpkg -L mesa-vulkan-drivers | grep '/lvp_icd.*\.json$')"
+          ctest --preset debug
+          python tests/reject_hardware.py build/debug/renderengine
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: linux-software-images
+          path: |
+            build/debug/images/*.ppm
+            build/debug/images/evidence.json
+          if-no-files-found: ignore
+
+  windows-build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.10'
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: x64
+      - name: Provision
+        run: |
+          python -m pip install cmake==3.31.6 ninja==1.11.1.4
+          python scripts/bootstrap.py
+      - name: Build Debug and Release; check oracle and CLI
+        shell: pwsh
+        run: |
+          foreach ($configuration in @('debug', 'release')) {
+            cmake --preset $configuration
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            cmake --build --preset $configuration --parallel 2
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            ctest --preset $configuration -R '^oracle$'
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            & "build/$configuration/renderengine.exe" --help
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          python tests/incremental.py build/debug
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
